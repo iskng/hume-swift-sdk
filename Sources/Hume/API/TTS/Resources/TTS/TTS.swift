@@ -6,7 +6,7 @@ public class TTS {
 
   private let networkClient: NetworkClient
 
-  init(networkClient: NetworkClient) {
+  internal init(networkClient: NetworkClient) {
     self.networkClient = networkClient
   }
 
