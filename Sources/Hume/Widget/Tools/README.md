@@ -151,20 +151,4 @@ See `ToolManagerTests.swift` for comprehensive test examples including:
 - Concurrent execution limits
 - Delegate callbacks
 
-## Migration from Previous Implementation
-
-If you were using the previous tool implementation:
-
-```swift
-// Old way (unsafe, no timeout support)
-voiceProvider.registerTool(name: "test") { params in
-    return result
-}
-
-// New way (thread-safe, with timeout)
-voiceProvider.tools.register("test") { params in
-    return result
-}
-```
-
-The new API is mostly compatible but provides better safety and control.
+.
