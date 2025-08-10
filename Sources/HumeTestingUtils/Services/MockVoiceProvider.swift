@@ -62,6 +62,17 @@ public class MockVoiceProvider: VoiceProvidable {
 
   }
 
+  // MARK: - Tools
+  public let tools: ToolManager = ToolManager()
+
+  public func sendToolResponse(_ response: ToolResponseMessage) async throws {
+    // no-op in mock
+  }
+
+  public func sendToolError(_ error: ToolErrorMessage) async throws {
+    // no-op in mock
+  }
+
   // MARK: - Event Simulation
   private func startSimulatingEvents() {
     mockEventsTask = Task.detached(priority: .userInitiated) {

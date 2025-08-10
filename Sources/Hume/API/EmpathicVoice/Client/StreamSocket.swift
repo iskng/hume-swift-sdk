@@ -35,7 +35,7 @@ public class StreamSocket {
      * Send raw data (such as audio bytes)
      */
   public func sendData(message: Data) async throws {
-    try await sendData(message)
+    try await self.sendSocketMessage(.data(message))
   }
 
   /**
@@ -56,6 +56,20 @@ public class StreamSocket {
      * Send assistant input
      */
   public func sendAssistantInput(message: AssistantInput) async throws {
+    try await send(message)
+  }
+
+  /**
+     * Send tool response message
+     */
+  public func sendToolResponse(message: ToolResponseMessage) async throws {
+    try await send(message)
+  }
+
+  /**
+     * Send tool error message
+     */
+  public func sendToolError(message: ToolErrorMessage) async throws {
     try await send(message)
   }
 

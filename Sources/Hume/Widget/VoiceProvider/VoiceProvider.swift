@@ -21,6 +21,10 @@ public class VoiceProvider: VoiceProvidable {
 
   public weak var delegate: (any VoiceProviderDelegate)?
 
+  // MARK: - Tool Management
+  public let tools: ToolManager
+  private var toolExecutionTask: Task<Void, Never>?
+
   // MARK: - Metering
   public var isOutputMeteringEnabled: Bool = false {
     didSet {
@@ -36,12 +40,18 @@ public class VoiceProvider: VoiceProvidable {
 
   // MARK: Init/deinit
 
-  public init(client: HumeClient) {
+  public init(client: HumeClient, toolConfiguration: ToolManager.Configuration = .init()) {
     self.humeClient = client
+    self.tools = ToolManager(configuration: toolConfiguration)
+    
+    // Set up internal tool manager delegate
+    self.tools.delegate = self
   }
 
   deinit {
     eventSubscription?.cancel()
+    toolExecutionTask?.cancel()
+    tools.cancelAllExecutions()
   }
 
   // MARK: - Connection
@@ -159,6 +169,10 @@ public class VoiceProvider: VoiceProvidable {
     }
     Logger.info("Disconnecting voice provider")
 
+    // Cancel any ongoing tool executions
+    toolExecutionTask?.cancel()
+    tools.cancelAllExecutions()
+    
     do {
       try await self.audioHub.stop()
     } catch {
@@ -197,6 +211,20 @@ public class VoiceProvider: VoiceProvidable {
 
   public func sendResumeAssistantMessage(message: ResumeAssistantMessage) async throws {
     try await socket?.resumeAssistant(message: message)
+  }
+
+  // MARK: - Tool Response Methods (for manual handling)
+  
+  /// Sends a tool response message directly to EVI.
+  /// Use this when you want to handle tool execution manually instead of using the ToolManager.
+  public func sendToolResponse(_ response: ToolResponseMessage) async throws {
+    try await socket?.sendToolResponse(message: response)
+  }
+
+  /// Sends a tool error message directly to EVI.
+  /// Use this when you want to handle tool execution manually instead of using the ToolManager.
+  public func sendToolError(_ error: ToolErrorMessage) async throws {
+    try await socket?.sendToolError(message: error)
   }
 }
 
@@ -294,9 +322,12 @@ extension VoiceProvider {
       }
 
       delegate?.voiceProvider(self, didProduceError: VoiceProviderError.websocketError(error))
-      Task {
-        await self.disconnect()
-      }
+      Task { await self.disconnect() }
+    case .toolCallMessage(let call):
+      handleToolCallMessage(call)
+    case .toolResponseMessage, .toolErrorMessage:
+      // These are responses from our tool execution, no action needed
+      break
     default: break
     }
     self.delegate?.voiceProvider(self, didProduceEvent: event)
@@ -341,5 +372,110 @@ extension VoiceProvider {
           self, didProduceError: VoiceProviderError.socketSendError(error))
       }
     }
+  }
+}
+
+// MARK: - Tool Handling
+extension VoiceProvider {
+  private func handleToolCallMessage(_ call: ToolCallMessage) {
+    // First check with delegate if we should handle this tool
+    let shouldExecute = delegate?.voiceProvider(self, shouldExecuteTool: call) ?? true
+    
+    guard shouldExecute else {
+      Logger.info("Tool execution prevented by delegate for: \(call.name)")
+      return
+    }
+    
+    // Only auto-execute if configured and response is required
+    guard tools.configuration.autoExecute && call.responseRequired else {
+      Logger.info("Manual tool handling required for: \(call.name)")
+      return
+    }
+    
+    // Cancel any existing execution task
+    toolExecutionTask?.cancel()
+    
+    // Create new execution task
+    toolExecutionTask = Task { [weak self] in
+      guard let self else { return }
+      
+      // Notify delegate
+      self.delegateQueue.async {
+        self.delegate?.voiceProvider(self, willExecuteTool: call)
+      }
+      
+      // Execute the tool
+      let result = await self.tools.execute(call)
+      
+      // Send response based on result
+      do {
+        switch result {
+        case .success(let content):
+          let response = ToolResponseMessage(
+            content: content,
+            customSessionId: call.customSessionId,
+            toolCallId: call.toolCallId,
+            toolName: call.name,
+            toolType: call.toolType
+          )
+          try await self.socket?.sendToolResponse(message: response)
+          
+        case .error(let message, let code):
+          let error = ToolErrorMessage(
+            code: code,
+            content: nil,
+            customSessionId: call.customSessionId,
+            error: message,
+            level: .warn,
+            toolCallId: call.toolCallId,
+            toolType: call.toolType
+          )
+          try await self.socket?.sendToolError(message: error)
+          
+        case .timeout:
+          let error = ToolErrorMessage(
+            code: "TIMEOUT",
+            content: nil,
+            customSessionId: call.customSessionId,
+            error: "Tool execution timed out",
+            level: .warn,
+            toolCallId: call.toolCallId,
+            toolType: call.toolType
+          )
+          try await self.socket?.sendToolError(message: error)
+          
+        case .cancelled:
+          Logger.info("Tool execution cancelled for: \(call.name)")
+          // Don't send error for cancelled operations
+        }
+        
+        // Notify delegate of completion
+        self.delegateQueue.async {
+          self.delegate?.voiceProvider(self, didExecuteTool: call, result: result)
+        }
+        
+      } catch {
+        Logger.error("Failed to send tool response: \(error)")
+        self.delegateQueue.async {
+          self.delegate?.voiceProvider(self, didFailToolExecution: call, error: error)
+        }
+      }
+    }
+  }
+}
+
+// MARK: - ToolManagerDelegate
+extension VoiceProvider: ToolManagerDelegate {
+  public func toolManager(_ manager: ToolManager, willExecute call: ToolCallMessage) async -> Bool {
+    // Additional validation could go here
+    return true
+  }
+  
+  public func toolManager(_ manager: ToolManager, didComplete call: ToolCallMessage, result: ToolManager.ExecutionResult) async {
+    Logger.info("Tool execution completed: \(call.name)")
+  }
+  
+  public func toolManager(_ manager: ToolManager, didFailExecution call: ToolCallMessage, error: Error) async {
+    Logger.error("Tool execution failed for \(call.name): \(error)")
   }
 }

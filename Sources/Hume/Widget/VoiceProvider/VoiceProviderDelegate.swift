@@ -26,6 +26,21 @@ public protocol VoiceProviderDelegate: AnyObject {
   func voiceProviderDidConnect(_ voiceProvider: any VoiceProvidable)
   /// Called when a sound clip is played.
   func voiceProvider(_ voiceProvider: any VoiceProvidable, didPlayClip clip: SoundClip)
+  
+  // MARK: - Tool Calling
+  
+  /// Called when a tool call is received. Return false to prevent automatic execution.
+  /// If autoExecuteTools is disabled, this method is still called for manual handling.
+  func voiceProvider(_ voiceProvider: any VoiceProvidable, shouldExecuteTool call: ToolCallMessage) -> Bool
+  
+  /// Called before a tool is executed (only when autoExecuteTools is enabled)
+  func voiceProvider(_ voiceProvider: any VoiceProvidable, willExecuteTool call: ToolCallMessage)
+  
+  /// Called after a tool execution completes (only when autoExecuteTools is enabled)
+  func voiceProvider(_ voiceProvider: any VoiceProvidable, didExecuteTool call: ToolCallMessage, result: ToolManager.ExecutionResult)
+  
+  /// Called when a tool execution fails (only when autoExecuteTools is enabled)
+  func voiceProvider(_ voiceProvider: any VoiceProvidable, didFailToolExecution call: ToolCallMessage, error: Error)
 }
 
 extension VoiceProviderDelegate {
@@ -45,4 +60,10 @@ extension VoiceProviderDelegate {
   public func voiceProviderDidDisconnect(_ voiceProvider: any VoiceProvidable) {}
   public func voiceProviderDidConnect(_ voiceProvider: any VoiceProvidable) {}
   public func voiceProvider(_ voiceProvider: any VoiceProvidable, didPlayClip clip: SoundClip) {}
+  
+  // Tool calling defaults
+  public func voiceProvider(_ voiceProvider: any VoiceProvidable, shouldExecuteTool call: ToolCallMessage) -> Bool { true }
+  public func voiceProvider(_ voiceProvider: any VoiceProvidable, willExecuteTool call: ToolCallMessage) {}
+  public func voiceProvider(_ voiceProvider: any VoiceProvidable, didExecuteTool call: ToolCallMessage, result: ToolManager.ExecutionResult) {}
+  public func voiceProvider(_ voiceProvider: any VoiceProvidable, didFailToolExecution call: ToolCallMessage, error: Error) {}
 }
